@@ -4,12 +4,14 @@ import {
   X,
   ChevronDown,
   ChevronUp,
-  AlertTriangle,
   Lightbulb,
   ArrowRight,
   Home,
   CheckCircle,
+  ClipboardList,
 } from 'lucide-react'
+import CaseTimeline from './CaseTimeline'
+import type { TimelineStep } from '../App'
 
 type Props = {
   open: boolean
@@ -22,8 +24,10 @@ type Props = {
   decisionSpeedPct: number
   guidelineAdherencePct: number
   interventionTimePct: number
-  deductions: string[]
   hintsUsed: string[]
+  timeline: TimelineStep[]
+  criticalActionDone: boolean
+  pendingActions: { id: string; label: string; critical: boolean }[]
 }
 
 export default function CaseSummaryModal({
@@ -37,11 +41,13 @@ export default function CaseSummaryModal({
   decisionSpeedPct,
   guidelineAdherencePct,
   interventionTimePct,
-  deductions,
   hintsUsed,
+  timeline,
+  criticalActionDone,
+  pendingActions,
 }: Props) {
-  const [deductionsExpanded, setDeductionsExpanded] = useState(false)
   const [hintsExpanded, setHintsExpanded] = useState(false)
+  const [timelineExpanded, setTimelineExpanded] = useState(true)
   const [feedback, setFeedback] = useState<string | null>(null)
   const navigate = useNavigate()
 
@@ -53,7 +59,7 @@ export default function CaseSummaryModal({
   const circumference = 2 * Math.PI * radius
   const strokeDashoffset = circumference - (score / 100) * circumference
 
-  const isSuccess = endReason === 'handoff'
+  const isSuccess = criticalActionDone
 
   return (
     <div
@@ -84,7 +90,15 @@ export default function CaseSummaryModal({
               }`}
             >
               <CheckCircle size={12} className="fill-current" />
-              <span>{isSuccess ? 'Proficient' : 'Failed / Timeout'}</span>
+              <span>
+                {criticalActionDone
+                  ? endReason === 'timeout'
+                    ? 'Stabilized (Time Expired)'
+                    : 'Proficient'
+                  : endReason === 'timeout'
+                    ? 'Failed / Timeout'
+                    : 'Unstable Handoff'}
+              </span>
             </div>
           </div>
 
@@ -123,7 +137,13 @@ export default function CaseSummaryModal({
 
           {/* Main heading & Subtitle */}
           <h2 className="text-center text-[20px] font-extrabold text-gray-800 tracking-tight leading-snug">
-            {isSuccess ? 'Well Done, Karthik S' : 'Simulation Failed'}
+            {criticalActionDone
+              ? endReason === 'timeout'
+                ? 'Patient Stabilized'
+                : 'Well Done, Karthik S'
+              : endReason === 'timeout'
+                ? 'Simulation Failed'
+                : 'Handed Off — Patient Unstable'}
           </h2>
           <p className="text-center text-[12px] text-gray-400 font-medium mt-0.5 mb-5">
             ICU deterioration assessment · Session ended
@@ -161,6 +181,21 @@ export default function CaseSummaryModal({
               </span>
             </div>
           </div>
+
+          {pendingActions.length > 0 && (
+            <div className={`mb-5 rounded-xl border px-4 py-3 ${pendingActions.some((action) => action.critical) ? 'border-red-200 bg-red-50/60' : 'border-amber-200 bg-amber-50/60'}`}>
+              <p className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${pendingActions.some((action) => action.critical) ? 'text-red-600' : 'text-amber-600'}`}>
+                Outstanding at Handoff
+              </p>
+              <ul className="space-y-1">
+                {pendingActions.map((action) => (
+                  <li key={action.id} className={`text-[12px] font-medium ${action.critical ? 'text-red-700' : 'text-amber-700'}`}>
+                    • {action.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Performance Breakdown Section */}
           <div className="border-t border-gray-100 pt-4 mb-4">
@@ -213,34 +248,78 @@ export default function CaseSummaryModal({
           {/* Expandable Accordions */}
           <div className="space-y-1.5 border-t border-gray-100 pt-4 mb-4">
             
-            {/* Deduction Log */}
+            {/* Case Timeline */}
+            <div className="mb-1.5 overflow-hidden rounded-xl border border-gray-100">
+              <button
+                type="button"
+                onClick={() => setTimelineExpanded(!timelineExpanded)}
+                className="flex w-full items-center justify-between bg-gray-50/50 px-3.5 py-2.5 text-left text-[12px] font-bold text-gray-700 transition-colors hover:bg-gray-50"
+              >
+                <div className="flex items-center gap-2">
+                  <ClipboardList size={14} className="text-primary" />
+                  <span>Case Timeline</span>
+                </div>
+                {timelineExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+              {timelineExpanded && (
+                <div className="max-h-[280px] overflow-y-auto border-t border-gray-100 bg-white px-4 py-4">
+                  <CaseTimeline timeline={timeline} endReason={endReason} isSuccess={isSuccess} finalScore={score} />
+                </div>
+              )}
+            </div>
+
+            {/*
             <div className="border border-gray-100 rounded-xl overflow-hidden">
               <button
                 type="button"
                 onClick={() => setDeductionsExpanded(!deductionsExpanded)}
                 className="w-full flex items-center justify-between px-3.5 py-2.5 bg-gray-50/50 hover:bg-gray-50 text-[12px] font-bold text-gray-700 text-left transition-colors"
               >
-                <div className="flex items-center gap-1.5">
-                  <AlertTriangle size={14} className="text-red-500" />
-                  <span>Deduction Log</span>
+                <div className="flex items-center gap-2">
+                  <ClipboardList size={14} className="text-primary" />
+                  <span>Clinical Decision Log</span>
+                  <div className="flex items-center gap-1">
+                    {creditPoints.length > 0 && (
+                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-600">
+                        {creditPoints.length} correct
+                      </span>
+                    )}
+                    {deductions.length > 0 && (
+                      <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-600">
+                        {deductions.length} deducted
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {deductionsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
               {deductionsExpanded && (
-                <div className="px-3.5 py-2.5 bg-white border-t border-gray-100 text-[11px] text-gray-500 space-y-1.5 max-h-[140px] overflow-y-auto">
-                  {deductions.length > 0 ? (
-                    deductions.map((d, index) => (
-                      <div key={index} className="flex items-start gap-2">
-                        <span className="text-red-500 font-bold shrink-0">•</span>
-                        <span>{d}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-gray-400 italic text-center py-1">No deductions logged! Perfect score.</div>
+                <div className="max-h-[220px] space-y-1.5 overflow-y-auto border-t border-gray-100 bg-white px-3.5 py-2.5">
+                  {creditPoints.length === 0 && deductions.length === 0 && (
+                    <div className="py-1 text-center text-[11px] italic text-gray-400">
+                      No clinical actions recorded yet.
+                    </div>
                   )}
+
+                  {creditPoints.map((credit, index) => (
+                    <div key={`credit-${index}`} className="flex items-start gap-2 rounded-lg border border-emerald-100/50 bg-emerald-50/60 px-2.5 py-2">
+                      <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-500" />
+                      <span className="text-[11px] font-medium leading-snug text-emerald-700">{credit}</span>
+                    </div>
+                  ))}
+
+                  {deductions.map((deduction, index) => (
+                    <div key={`deduction-${index}`} className="flex items-start gap-2 rounded-lg border border-red-100/50 bg-red-50/60 px-2.5 py-2 [&>span:first-child]:hidden">
+                        <span className="text-red-500 font-bold shrink-0">•</span>
+                      <AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-500" />
+                      <span className="text-[11px] font-medium leading-snug text-red-700">{deduction}</span>
+                      </div>
+                  ))}
                 </div>
               )}
             </div>
+
+            */}
 
             {/* Hint Summary */}
             <div className="border border-gray-100 rounded-xl overflow-hidden">

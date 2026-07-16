@@ -6,6 +6,7 @@ import { INITIAL_MESSAGES, type ChatMessage } from './components/ChatPanel'
 import OutcomeModal from './components/OutcomeModal'
 import PatientDetailModal from './components/PatientDetailModal'
 import CaseSummaryModal from './components/CaseSummaryModal'
+import HandoffConfirmModal from './components/HandoffConfirmModal'
 
 export type ScenarioMode = 'pneumothorax' | 'pe_trap' | 'stemi'
 
@@ -21,6 +22,15 @@ export type Vitals = {
   rr: number
   spo2: number
   temp: number
+}
+
+export type TimelineStep = {
+  id: string
+  label: string
+  points: number
+  correct: boolean | 'neutral'
+  reason: string
+  timestamp: number
 }
 
 const ACTION_MESSAGES: Record<string, { system: string; patient?: string }> = {
@@ -175,6 +185,45 @@ export function getVitals(scenario: ScenarioMode, performedActions: string[], se
   return { hr, bp, rr, spo2, temp }
 }
 
+function getActionPointsInfo(actionId: string, decompDoneBefore: boolean) {
+  switch (actionId) {
+    case 'lung-ultrasound':
+      return { label: 'Lung Ultrasound', points: 10, correct: true as const, reason: 'Fast, correct first-line diagnostic' }
+    case 'chest-xray':
+      return decompDoneBefore
+        ? { label: 'Chest X-Ray', points: 2, correct: true as const, reason: 'Confirmatory imaging after stabilization' }
+        : { label: 'Chest X-Ray', points: -15, correct: false as const, reason: 'Delayed lifesaving decompression' }
+    case 'ecg-troponin':
+      return { label: 'ECG & Troponin', points: 0, correct: 'neutral' as const, reason: 'Reasonable rule-out, but not the priority here' }
+    case 'ctpa':
+      return decompDoneBefore
+        ? { label: 'CT Pulmonary Angiography', points: 0, correct: 'neutral' as const, reason: 'Unnecessary now, but no longer harmful' }
+        : { label: 'CT Pulmonary Angiography', points: -20, correct: false as const, reason: 'Critical delay of emergency care' }
+    case 'ddimer-bnp':
+      return { label: 'D-Dimer & BNP', points: 0, correct: 'neutral' as const, reason: 'Reasonable rule-out, but added time cost' }
+    case 'leg-ultrasound':
+      return { label: 'Leg Ultrasound', points: 0, correct: 'neutral' as const, reason: 'Reasonable rule-out, but added time cost' }
+    case 'oxygen':
+      return { label: 'Supplemental Oxygen', points: 5, correct: true as const, reason: 'Appropriate supportive care' }
+    case 'nitroglycerin':
+      return { label: 'Nitroglycerin', points: -10, correct: false as const, reason: 'Drops BP further — no indication here' }
+    case 'heparin':
+      return { label: 'Heparin', points: -10, correct: false as const, reason: 'Anticoagulation cannot fix a mechanical collapse' }
+    case 'thrombolysis':
+      return { label: 'Thrombolysis', points: -20, correct: false as const, reason: 'Contraindicated — major hemorrhage risk' }
+    case 'vasopressors':
+      return { label: 'Vasopressors', points: -5, correct: false as const, reason: 'Masks the problem instead of fixing it' }
+    case 'needle-decomp':
+      return { label: 'Needle Decompression', points: 50, correct: true as const, reason: 'The definitive, life-saving intervention' }
+    case 'intubation-ppv':
+      return decompDoneBefore
+        ? { label: 'Intubation & PPV', points: 0, correct: 'neutral' as const, reason: 'Safe once decompressed' }
+        : { label: 'Intubation & PPV', points: -30, correct: false as const, reason: 'Triggers cardiovascular collapse pre-decompression' }
+    default:
+      return { label: actionId, points: 0, correct: 'neutral' as const, reason: '' }
+  }
+}
+
 export default function App() {
   const [chatExpanded, setChatExpanded] = useState(false)
   const [message, setMessage] = useState('')
@@ -184,16 +233,23 @@ export default function App() {
   const [secondsLeft, setSecondsLeft] = useState(12 * 60) // 12:00
   const [scenario, setScenario] = useState<ScenarioMode>('pneumothorax')
   const [performedActions, setPerformedActions] = useState<string[]>([])
+  const [timeline, setTimeline] = useState<TimelineStep[]>([])
   const [hasCrashedMsg, setHasCrashedMsg] = useState(false)
   const [activeOutcomeAction, setActiveOutcomeAction] = useState<string | null>(null)
   const [patientModalOpen, setPatientModalOpen] = useState(false)
   const [caseEndReason, setCaseEndReason] = useState<'handoff' | 'timeout' | null>(null)
+  const [handoffConfirmOpen, setHandoffConfirmOpen] = useState(false)
   const [hintsUsed, setHintsUsed] = useState<string[]>([])
   const [isMuted, setIsMuted] = useState(true)
   const [isSoundOn, setIsSoundOn] = useState(true)
 
   const [patientOverrideImage, setPatientOverrideImage] = useState<string | null>(null)
   const overrideTimerRef = useRef<number | null>(null)
+  const performedActionsRef = useRef<string[]>([])
+
+  useEffect(() => {
+    performedActionsRef.current = performedActions
+  }, [performedActions])
 
   const triggerImageOverride = useCallback((img: string, duration = 3000) => {
     setPatientOverrideImage(img)
@@ -220,10 +276,15 @@ export default function App() {
   }
 
   const handlePerformAction = useCallback((actionId: string, timePenalty: number) => {
-    setPerformedActions((prev) => {
-      if (prev.includes(actionId)) return prev
-      return [...prev, actionId]
-    })
+    if (performedActionsRef.current.includes(actionId)) return
+    const decompDoneBefore = performedActionsRef.current.includes('needle-decomp')
+    const info = getActionPointsInfo(actionId, decompDoneBefore)
+
+    setPerformedActions((prev) => (prev.includes(actionId) ? prev : [...prev, actionId]))
+    setTimeline((prev) => [
+      ...prev,
+      { id: `${actionId}-${Date.now()}`, label: info.label, points: info.points, correct: info.correct, reason: info.reason, timestamp: Date.now() },
+    ])
     setSecondsLeft((prev) => Math.max(0, prev - timePenalty))
 
     const diagnosticActionIds = [
@@ -285,6 +346,19 @@ export default function App() {
 
   // Auto-crash effect
   const isNeedleDecomp = performedActions.includes('needle-decomp')
+  const isDiagnosisConfirmed = performedActions.includes('lung-ultrasound') || performedActions.includes('chest-xray')
+  const isOxygenGiven = performedActions.includes('oxygen')
+  const pendingActionsAtHandoff = [
+    ...(!isDiagnosisConfirmed
+      ? [{ id: 'diagnosis-confirmed', label: 'Confirm diagnosis (Lung Ultrasound or Chest X-Ray)', critical: false }]
+      : []),
+    ...(!isOxygenGiven
+      ? [{ id: 'oxygen', label: 'Supplemental Oxygen (supportive care)', critical: false }]
+      : []),
+    ...(!isNeedleDecomp
+      ? [{ id: 'needle-decomp', label: 'Needle Decompression (definitive treatment)', critical: true }]
+      : []),
+  ]
   const isTimeCrashed = secondsLeft <= 120 && !isNeedleDecomp
   
   const hasTimedOutRef = useRef(false)
@@ -301,6 +375,10 @@ export default function App() {
     if (hintsUsed.length < CLINICAL_HINTS.length) {
       const hintText = CLINICAL_HINTS[hintsUsed.length]
       setHintsUsed((prev) => [...prev, hintText])
+      setTimeline((prev) => [
+        ...prev,
+        { id: `hint-${Date.now()}`, label: 'Clinical Hint Used', points: -5, correct: false, reason: hintText, timestamp: Date.now() },
+      ])
       setMessages((prev) => [
         ...prev,
         {
@@ -460,7 +538,7 @@ export default function App() {
             secondsLeft={secondsLeft}
             onTickDown={setSecondsLeft}
             vitals={vitals}
-            onHandOff={() => setCaseEndReason('handoff')}
+            onHandOff={() => setHandoffConfirmOpen(true)}
             caseEnded={caseEndReason !== null}
             scenario={scenario}
           />
@@ -476,6 +554,15 @@ export default function App() {
           open={patientModalOpen}
           onClose={() => setPatientModalOpen(false)}
         />
+        <HandoffConfirmModal
+          open={handoffConfirmOpen}
+          onClose={() => setHandoffConfirmOpen(false)}
+          onConfirm={() => {
+            setHandoffConfirmOpen(false)
+            setCaseEndReason('handoff')
+          }}
+          pendingActions={pendingActionsAtHandoff}
+        />
         <CaseSummaryModal
           open={caseEndReason !== null}
           onClose={() => setCaseEndReason(null)}
@@ -487,8 +574,10 @@ export default function App() {
           decisionSpeedPct={decisionSpeedPct}
           guidelineAdherencePct={guidelineAdherencePct}
           interventionTimePct={interventionTimePct}
-          deductions={deductions}
           hintsUsed={hintsUsed}
+          timeline={timeline}
+          criticalActionDone={isNeedleDecomp}
+          pendingActions={pendingActionsAtHandoff}
         />
       </div>
     )
