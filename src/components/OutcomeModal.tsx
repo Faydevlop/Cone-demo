@@ -9,7 +9,7 @@ type Props = {
   actionId: string | null
 }
 
-function ObservationQuestion({ actionId }: { actionId: string }) {
+function ObservationQuestion({ actionId, hideAnswer }: { actionId: string; hideAnswer?: boolean }) {
   const [selected, setSelected] = useState<number[]>([])
   const action = ACTIONS_BY_ID[actionId]
 
@@ -43,8 +43,8 @@ function ObservationQuestion({ actionId }: { actionId: string }) {
       <div className="space-y-1.5">
         {action.observationChoices.map((choice, i) => {
           const isSelected = selected.includes(i)
-          const showCorrect = isSelected && choice.isCorrect
-          const showWrong = isSelected && !choice.isCorrect
+          const showCorrect = !hideAnswer && isSelected && choice.isCorrect
+          const showWrong = !hideAnswer && isSelected && !choice.isCorrect
 
           return (
             <button
@@ -76,7 +76,7 @@ function ObservationQuestion({ actionId }: { actionId: string }) {
           )
         })}
       </div>
-      {selected.length > 0 && (
+      {!hideAnswer && selected.length > 0 && (
         <p className={`text-[10.5px] font-semibold ${isFullyCorrect ? 'text-emerald-600' : hasWrongSelected ? 'text-red-600' : 'text-blue-600'}`}>
           {isFullyCorrect
             ? 'Correct! All valid findings selected.'
@@ -514,13 +514,11 @@ export default function OutcomeModal({ open, onClose, actionId }: Props) {
               <div className="border border-purple-100 rounded-xl p-2.5 bg-purple-50/40">
                 <span className="text-purple-600 font-bold block mb-0.5 text-[11px]">Routine Bloods — Unremarkable</span>
                 <span className="text-gray-600 leading-normal block text-[10.5px]">
-                  Routine bloods unremarkable — not diagnostic for pneumothorax; this route delays diagnosis.
+                  Routine bloods unremarkable — not diagnostic for the suspected condition; this route delays diagnosis.
                 </span>
               </div>
 
-              <ImpressionCard actionId={actionId} />
-
-              <ObservationQuestion actionId={actionId} />
+              <ObservationQuestion actionId={actionId} hideAnswer />
             </div>
           )}
 
@@ -538,9 +536,7 @@ export default function OutcomeModal({ open, onClose, actionId }: Props) {
                 </span>
               </div>
 
-              <ImpressionCard actionId={actionId} />
-
-              <ObservationQuestion actionId={actionId} />
+              <ObservationQuestion actionId={actionId} hideAnswer />
             </div>
           )}
 
@@ -559,8 +555,8 @@ export default function OutcomeModal({ open, onClose, actionId }: Props) {
             actionId !== 'physical-exam' &&
             actionId !== 'ecg' && (
             <div className="space-y-3">
-              <ImpressionCard actionId={actionId} />
-              <ObservationQuestion actionId={actionId} />
+              {currentAction?.tab !== 'laboratory' && <ImpressionCard actionId={actionId} />}
+              <ObservationQuestion actionId={actionId} hideAnswer={currentAction?.tab === 'laboratory'} />
             </div>
           )}
 

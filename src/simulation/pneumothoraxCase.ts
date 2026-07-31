@@ -235,7 +235,7 @@ export const ACTIONS: CaseAction[] = [
     timeCost: 300,
     resultText:
       'Routine bloods unremarkable (WBC 8.2, Hgb 14.5, Na 139, K 4.1) — not diagnostic for pneumothorax; delays care.',
-    observationQuestion: 'Is a blood panel diagnostic for pneumothorax?',
+    observationQuestion: 'Is a blood panel diagnostic for the suspected condition?',
     observationChoices: [
       { text: 'No — imaging/POCUS is required', isCorrect: true },
       { text: 'Yes — CBC confirms it', isCorrect: false },
